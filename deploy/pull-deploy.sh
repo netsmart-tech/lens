@@ -48,9 +48,15 @@ mkdir -p "$BACKUP_DIR"
 # --- Pre-deploy backup: per-tenant schema dump against external loyd-pg ---
 # Backup every lens_* schema individually so restore can be scoped to one
 # client if needed. Uses DATABASE_URL from .env.runtime — read-only operation.
+#
+# DATABASE_URL is the SQLAlchemy asyncpg form (postgresql+asyncpg://...), which
+# libpq (psql / pg_dump) does not understand. Strip the driver qualifier for
+# CLI use only.
+PSQL_URL="${DATABASE_URL/postgresql+asyncpg:\/\//postgresql:\/\/}"
+
 echo "==> Pre-deploy backup: per-tenant schemas on loyd-pg..."
 TS="$(date +%Y%m%d-%H%M%S)"
-SCHEMAS="$(psql "$DATABASE_URL" -At -c \
+SCHEMAS="$(psql "$PSQL_URL" -At -c \
     "SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE 'lens%' ORDER BY schema_name;")"
 
 if [[ -z "$SCHEMAS" ]]; then
@@ -59,7 +65,7 @@ else
     for schema in $SCHEMAS; do
         OUT="${BACKUP_DIR}/${schema}-${TS}.sql.gz"
         echo "    dumping ${schema} -> ${OUT}"
-        pg_dump "$DATABASE_URL" --schema="$schema" --no-owner --no-acl | gzip > "$OUT"
+        pg_dump "$PSQL_URL" --schema="$schema" --no-owner --no-acl | gzip > "$OUT"
     done
 fi
 

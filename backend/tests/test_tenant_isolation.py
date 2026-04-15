@@ -20,10 +20,13 @@ async def test_tenant_isolation(tenant_session_factory) -> None:
     alpha_site = uuid.uuid4()
     beta_site = uuid.uuid4()
 
-    # Insert into alpha
+    # Insert into alpha — flush site before adding issue so the FK parent
+    # row commits first (JiraIssue lacks an explicit ORM relationship, so
+    # SQLAlchemy won't auto-order inserts across them).
     alpha = await tenant_session_factory("test_alpha")
     try:
         alpha.add(JiraSite(id=alpha_site, base_url="https://alpha.atlassian.net", display_name="alpha"))
+        await alpha.flush()
         alpha.add(
             JiraIssue(
                 site_id=alpha_site,
@@ -40,6 +43,7 @@ async def test_tenant_isolation(tenant_session_factory) -> None:
     beta = await tenant_session_factory("test_beta")
     try:
         beta.add(JiraSite(id=beta_site, base_url="https://beta.atlassian.net", display_name="beta"))
+        await beta.flush()
         beta.add(
             JiraIssue(
                 site_id=beta_site,

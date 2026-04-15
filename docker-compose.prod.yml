@@ -13,7 +13,7 @@ services:
 
   backend:
     restart: unless-stopped
-    depends_on: []
+    depends_on: !reset []
     ports:
       - "${BACKEND_PORT:-8100}:8000"
     volumes:
@@ -31,7 +31,7 @@ services:
 
   worker-jira:
     restart: unless-stopped
-    depends_on: []
+    depends_on: !reset []
     volumes:
       - /etc/lens/secrets-proxy.crt:/etc/lens/secrets-proxy.crt:ro
       - /etc/lens/secrets-proxy.key:/etc/lens/secrets-proxy.key:ro
@@ -45,7 +45,7 @@ services:
 
   frontend:
     restart: unless-stopped
-    depends_on: []
+    depends_on: !reset []
     ports:
       - "${FRONTEND_PORT:-3100}:3000"
     logging:
