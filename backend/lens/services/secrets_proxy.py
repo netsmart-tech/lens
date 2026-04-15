@@ -1,19 +1,24 @@
 """Secrets-proxy client.
 
-Architecture: the secrets-proxy at `secrets-proxy.netsmart.tech` is a TLS-
-intercepting forward proxy that scans every outbound request's headers + body
-for `{secret:name}` placeholders, substitutes the matching secret value, and
-forwards the (rewritten) request to the real upstream (Jira, Anthropic, …).
-The proxy authenticates clients via mTLS — see `/etc/lens/secrets-proxy.{crt,key,ca.crt}`.
+Architecture: the secrets-proxy at 172.16.40.33 is an **SNI-based TLS-
+intercepting proxy** — not an HTTP CONNECT forward proxy. Clients redirect
+upstream hostnames (e.g. ``topbuild-solutions.atlassian.net``) to the proxy
+IP via ``/etc/hosts`` (or docker-compose ``extra_hosts``), then open a
+normal HTTPS connection. The proxy reads the SNI during TLS handshake,
+dynamically issues a cert for that hostname signed by its own CA, completes
+the TLS handshake, parses the inner HTTP, scans headers + body for
+``{secret:name}`` placeholders, substitutes, and forwards to the real
+upstream over a fresh TLS connection.
 
 Two consumers in Lens:
-- The Jira sync worker (this is the live use today).
+- The Jira sync worker (live use today — per-tenant Atlassian REST).
 - Future: Anthropic API for the report generator (Phase 3).
 
-Both call `make_proxy_client()` to get an `httpx.AsyncClient` configured with
-the right proxy URL + mTLS material. Headers like
-``Authorization: Basic {secret:topbuild-jira-api-token}`` go through unmodified
-on the wire to the proxy, which substitutes the placeholder before forwarding.
+Both call `make_proxy_client()` to get an `httpx.AsyncClient` configured
+with mTLS. The httpx client does NOT use an HTTP proxy — it makes direct
+TCP connections that happen to hit the proxy IP because `/etc/hosts`
+redirected the hostname. All outbound request headers can carry
+``{secret:name}`` placeholders; the proxy substitutes server-side.
 
 Dev fallback: when `settings.secrets_proxy_url` is empty, the client is a
 plain direct-connect httpx client. Caller is expected to inline its own creds.
@@ -33,7 +38,7 @@ def make_proxy_client(
     base_url: str | None = None,
     timeout_s: float = 30.0,
 ) -> httpx.AsyncClient:
-    """Build an httpx.AsyncClient that routes through the secrets-proxy.
+    """Build an httpx.AsyncClient that talks to the secrets-proxy via mTLS.
 
     Args:
         base_url: Optional base URL bound to the client.
@@ -55,14 +60,14 @@ def make_proxy_client(
             "(SECRETS_PROXY_CLIENT_CERT / SECRETS_PROXY_CLIENT_KEY)."
         )
 
-    # The proxy serves its own TLS cert to clients AND MITMs the inner TLS
-    # to the upstream (Jira, etc.) using its own CA. Trusting the proxy's CA
-    # bundle covers both legs.
+    # The proxy uses its own CA to dynamically issue per-SNI certs when MITMing
+    # inbound connections. httpx must trust that CA when verifying the "server"
+    # cert during TLS handshake. No `proxy=` param — hostname resolution is
+    # handled at the container network layer (docker-compose extra_hosts).
     verify: str | bool = settings.secrets_proxy_ca_cert or True
 
     return httpx.AsyncClient(
         base_url=base_url or "",
-        proxy=settings.secrets_proxy_url,
         cert=(settings.secrets_proxy_client_cert, settings.secrets_proxy_client_key),
         verify=verify,
         timeout=httpx.Timeout(timeout_s, connect=10.0),

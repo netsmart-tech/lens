@@ -19,6 +19,12 @@ services:
     volumes:
       - /etc/lens/secrets-proxy.crt:/etc/lens/secrets-proxy.crt:ro
       - /etc/lens/secrets-proxy.key:/etc/lens/secrets-proxy.key:ro
+      - /etc/lens/secrets-proxy-ca.crt:/etc/lens/secrets-proxy-ca.crt:ro
+    # Route vendor API hostnames to the secrets-proxy IP. Proxy uses SNI to
+    # know which upstream to forward to after substituting placeholders.
+    # Add new entries here as tenants onboard more vendor APIs.
+    extra_hosts:
+      - "topbuild-solutions.atlassian.net:172.16.40.33"
     # Run alembic for all schemas, then start uvicorn with 2 workers for prod.
     command: >
       sh -c "alembic -x mode=all upgrade head &&
@@ -35,6 +41,11 @@ services:
     volumes:
       - /etc/lens/secrets-proxy.crt:/etc/lens/secrets-proxy.crt:ro
       - /etc/lens/secrets-proxy.key:/etc/lens/secrets-proxy.key:ro
+      - /etc/lens/secrets-proxy-ca.crt:/etc/lens/secrets-proxy-ca.crt:ro
+    # Route each tenant's Jira site to the secrets-proxy IP.
+    # Add new entries here as tenants are onboarded.
+    extra_hosts:
+      - "topbuild-solutions.atlassian.net:172.16.40.33"
     # Prod cadence: 5-min incremental sync.
     command: ["python", "-m", "lens.workers.jira", "--interval", "300"]
     logging:
