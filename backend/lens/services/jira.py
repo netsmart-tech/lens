@@ -100,24 +100,46 @@ class JiraClient:
         resp.raise_for_status()
         return resp.json()
 
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(5),
+        wait=wait_exponential_jitter(initial=1, max=30),
+        retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.TransportError)),
+    )
+    async def _post(self, path: str, json_body: dict) -> dict:
+        async with self._limiter:
+            resp = await self._client.post(path, json=json_body)
+        if resp.status_code == 429:
+            retry_after = int(resp.headers.get("Retry-After", "0") or 0)
+            if retry_after:
+                await asyncio.sleep(retry_after)
+        resp.raise_for_status()
+        return resp.json()
+
     # ---- high-level ops -----------------------------------------------------
 
     async def search_issues(
         self,
         jql: str,
         fields: list[str] | None = None,
-        start_at: int = 0,
+        next_page_token: str | None = None,
         max_results: int = 100,
     ) -> dict:
-        """POST /rest/api/3/search. Cursor-of-sorts via start_at."""
-        params: dict[str, Any] = {
+        """POST /rest/api/3/search/jql — Atlassian's replacement for the
+        deprecated GET /rest/api/3/search endpoint (410 Gone as of early 2025).
+
+        Response shape: {"issues": [...], "nextPageToken": "..." | missing}.
+        Pagination is token-based now; no startAt, no total, no isLast.
+        """
+        body: dict[str, Any] = {
             "jql": jql,
-            "startAt": start_at,
             "maxResults": max_results,
         }
         if fields:
-            params["fields"] = ",".join(fields)
-        return await self._get("/rest/api/3/search", params=params)
+            body["fields"] = list(fields)
+        if next_page_token:
+            body["nextPageToken"] = next_page_token
+        return await self._post("/rest/api/3/search/jql", json_body=body)
 
     async def get_issue(self, key: str) -> dict:
         return await self._get(f"/rest/api/3/issue/{key}")
