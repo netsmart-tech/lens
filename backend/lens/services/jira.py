@@ -5,12 +5,17 @@ Per Teo §5 / DESIGN §3.6:
 - `tenacity` retry with exponential backoff on 429/5xx/TransportError.
 - Per-site limiter singletons (shared Jira Cloud rate limit across tenants
   sharing a site).
+
+Auth: caller supplies the literal `Authorization` header value. In prod that
+includes a `{secret:<name>}` placeholder which the secrets-proxy substitutes
+in flight (e.g. `Basic {secret:topbuild-jira-api-token}` — the secret stored
+in the proxy is the pre-base64-encoded `email:token` blob). The HTTPS path
+to Jira routes through the secrets-proxy via `make_proxy_client`.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
 from typing import Any
 
 import httpx
@@ -24,6 +29,7 @@ from tenacity import (
 
 from lens.config import settings
 from lens.logging import get_logger
+from lens.services.secrets_proxy import make_proxy_client
 
 log = get_logger(__name__)
 
@@ -45,23 +51,22 @@ def _limiter_for(base_url: str) -> AsyncLimiter:
 class JiraClient:
     """Async Jira Cloud REST client.
 
-    Uses email + API token basic auth (Jira Cloud convention). Pass the bare
-    site URL (e.g. `https://topbuild.atlassian.net`); path prefixes are added
-    per-method.
+    Args:
+        base_url: Site URL, e.g. `https://topbuild.atlassian.net`. Path
+            prefixes are added per-method.
+        authorization: Full `Authorization` header value to send with every
+            request. In prod: `Basic {secret:<slug>-jira-api-token}` — the
+            secrets-proxy substitutes the literal placeholder for the stored
+            base64(email:token) blob before forwarding to Atlassian.
     """
 
-    def __init__(self, base_url: str, email: str, api_token: str):
+    def __init__(self, base_url: str, authorization: str):
         self.base_url = base_url.rstrip("/")
-        token_bytes = f"{email}:{api_token}".encode()
-        basic = base64.b64encode(token_bytes).decode("ascii")
-        self._client = httpx.AsyncClient(
-            base_url=self.base_url,
-            headers={
-                "Authorization": f"Basic {basic}",
-                "Accept": "application/json",
-            },
-            timeout=httpx.Timeout(30.0, connect=10.0),
-        )
+        self._client = make_proxy_client(base_url=self.base_url)
+        self._client.headers.update({
+            "Authorization": authorization,
+            "Accept": "application/json",
+        })
         self._limiter = _limiter_for(self.base_url)
 
     async def aclose(self) -> None:

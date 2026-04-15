@@ -42,9 +42,13 @@ class Settings(BaseSettings):
     lens_dev_user_name: str = "Steve Jensen"
 
     # --- Secrets proxy ---
+    # When configured, outbound HTTPS to vendor APIs (Jira, Anthropic, …) is
+    # routed through the proxy via HTTPS_PROXY. Authorization headers carry
+    # `{secret:name}` placeholders that the proxy substitutes server-side.
     secrets_proxy_url: str = ""
     secrets_proxy_client_cert: str = ""
     secrets_proxy_client_key: str = ""
+    secrets_proxy_ca_cert: str = ""
     secrets_proxy_cache_ttl_s: int = 300
 
     # --- Sync workers ---

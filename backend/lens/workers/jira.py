@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import os
 import uuid
 from datetime import UTC, datetime
 
@@ -34,7 +36,6 @@ from lens.models.tenant.jira_issues import JiraIssue
 from lens.models.tenant.jira_sites import JiraSite
 from lens.services.activities import record_activity
 from lens.services.jira import JiraClient
-from lens.services.secrets_proxy import get_secret
 
 configure_logging()
 log = get_logger("lens.worker.jira")
@@ -51,20 +52,37 @@ async def _tenant_session(tenant: Tenant) -> AsyncSession:
     return session
 
 
-async def _resolve_jira_credentials(slug: str) -> tuple[str, str, str] | None:
-    """Return (base_url, email, token) or None if unconfigured.
+def _resolve_jira_config(slug: str) -> tuple[str, str] | None:
+    """Return (base_url, authorization_header) or None if unconfigured.
 
-    Tries three named secrets per tenant slug:
-      <slug>-jira-url, <slug>-jira-email, <slug>-jira-api-token
+    Per-tenant config:
+      - `JIRA_<SLUG>_URL` (env var, sourced from Infisical /apps/lens/) — required.
+      - In prod (secrets_proxy_url set): authorization is the literal placeholder
+        ``Basic {secret:<slug>-jira-api-token}``. The proxy substitutes the stored
+        base64(email:token) blob before forwarding to Atlassian.
+      - In dev (no proxy): authorization is constructed locally from
+        ``LENS_STATIC_<SLUG>_JIRA_EMAIL`` + ``LENS_STATIC_<SLUG>_JIRA_TOKEN``.
     """
-    try:
-        base_url = await get_secret(f"{slug}-jira-url")
-        email = await get_secret(f"{slug}-jira-email")
-        token = await get_secret(f"{slug}-jira-api-token")
-    except (KeyError, NotImplementedError) as e:
-        log.info("jira_creds_unavailable", tenant=slug, reason=str(e))
+    slug_env = slug.upper().replace("-", "_")
+    base_url = os.environ.get(f"JIRA_{slug_env}_URL")
+    if not base_url:
+        log.info("jira_skip_no_url", tenant=slug, env_var=f"JIRA_{slug_env}_URL")
         return None
-    return base_url, email, token
+
+    if settings.secrets_proxy_url:
+        # Prod: placeholder; proxy substitutes the base64 blob.
+        authorization = f"Basic {{secret:{slug}-jira-api-token}}"
+    else:
+        # Dev fallback — inline encode from LENS_STATIC_* env vars.
+        email = os.environ.get(f"LENS_STATIC_{slug_env}_JIRA_EMAIL")
+        token = os.environ.get(f"LENS_STATIC_{slug_env}_JIRA_TOKEN")
+        if not (email and token):
+            log.info("jira_skip_no_dev_creds", tenant=slug)
+            return None
+        encoded = base64.b64encode(f"{email}:{token}".encode()).decode()
+        authorization = f"Basic {encoded}"
+
+    return base_url, authorization
 
 
 async def _ensure_site(session: AsyncSession, base_url: str) -> JiraSite:
@@ -118,11 +136,11 @@ async def sync_tenant(
     tenant: Tenant,
     mode_override: str | None = None,
 ) -> None:
-    creds = await _resolve_jira_credentials(tenant.slug)
-    if creds is None:
+    cfg = _resolve_jira_config(tenant.slug)
+    if cfg is None:
         log.info("jira_skip_tenant_no_creds", tenant=tenant.slug)
         return
-    base_url, email, token = creds
+    base_url, authorization = cfg
 
     session = await _tenant_session(tenant)
     started = datetime.now(UTC)
@@ -150,7 +168,7 @@ async def sync_tenant(
             jql_parts.append(f'updated >= "{ss.cursor}"')
         jql = " AND ".join(jql_parts) + (" ORDER BY updated ASC" if jql_parts else "ORDER BY updated ASC")
 
-        async with JiraClient(base_url, email, token) as client:
+        async with JiraClient(base_url, authorization) as client:
             page = await client.search_issues(
                 jql=jql,
                 fields=["summary", "status", "priority", "assignee", "reporter", "created", "updated"],
