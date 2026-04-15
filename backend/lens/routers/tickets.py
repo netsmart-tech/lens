@@ -100,11 +100,13 @@ async def get_ticket(
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
-    description: str | None = None
-    if row.raw:
-        fields = (row.raw or {}).get("fields") or {}
-        description = _adf_to_text(fields.get("description")).strip() or None
+    fields: dict[str, Any] = (row.raw or {}).get("fields") or {}
+    description = _adf_to_text(fields.get("description")).strip() or None
 
+    # Prefer the jira_comments table when the worker has populated it (Phase 2
+    # expand). In Phase 1 the table is empty but raw.fields.comment.comments
+    # holds the first ~5 comments inline from the /search/jql response — parse
+    # those so detail pages render immediately.
     comments_rows = (
         await ctx.session.execute(
             select(JiraComment)
@@ -112,7 +114,33 @@ async def get_ticket(
             .order_by(JiraComment.created.asc())
         )
     ).scalars().all()
-    comments = [CommentResponse.model_validate(c) for c in comments_rows]
+    if comments_rows:
+        comments = [CommentResponse.model_validate(c) for c in comments_rows]
+    else:
+        comments = []
+        raw_comments = ((fields.get("comment") or {}).get("comments")) or []
+        for c in raw_comments:
+            author = (c.get("author") or {}).get("emailAddress") or (c.get("author") or {}).get("displayName")
+            body_text = _adf_to_text(c.get("body")).strip()
+            created = c.get("created")
+            if not created:
+                continue
+            # Synthesize an int id from the Jira comment id for the schema's
+            # int id field. Jira ids are numeric-ish strings, try int cast;
+            # fall back to hash if not.
+            raw_id = c.get("id") or "0"
+            try:
+                cid = int(raw_id)
+            except (TypeError, ValueError):
+                cid = abs(hash(raw_id)) & 0x7FFFFFFF
+            from datetime import datetime as _dt
+            created_dt = _dt.fromisoformat(created.replace("Z", "+00:00"))
+            comments.append(CommentResponse(
+                id=cid,
+                author=author,
+                body=body_text or "(empty)",
+                created=created_dt,
+            ))
 
     return TicketDetailResponse.model_validate(row).model_copy(
         update={"description": description, "comments": comments}
