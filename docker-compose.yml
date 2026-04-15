@@ -1,0 +1,101 @@
+# =============================================================================
+# Lens — base compose (shared by dev and prod via overrides)
+#
+# Usage:
+#   Dev:  docker compose --env-file .env.development -f docker-compose.yml -f docker-compose.dev.yml up
+#         (or: make dev)
+#   Prod: docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml up -d
+# =============================================================================
+
+services:
+  db:
+    # Local Postgres for dev; prod overrides this with an external_links / no-op (uses loyd-pg)
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-lens}
+      POSTGRES_USER: ${DB_USER:-lens}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-lens}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    image: ghcr.io/netsmart-tech/lens-backend:${IMAGE_TAG:-latest}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3101}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      OIDC_AUTHORIZE_URL: ${OIDC_AUTHORIZE_URL:-https://auth.netsmart.tech/application/o/authorize/}
+      OIDC_TOKEN_URL: ${OIDC_TOKEN_URL:-https://auth.netsmart.tech/application/o/token/}
+      OIDC_USERINFO_URL: ${OIDC_USERINFO_URL:-https://auth.netsmart.tech/application/o/userinfo/}
+      OIDC_FRONTEND_URL: ${OIDC_FRONTEND_URL:-/}
+      LENS_DEV_AUTH: ${LENS_DEV_AUTH:-0}
+      LENS_DEV_USER_EMAIL: ${LENS_DEV_USER_EMAIL:-}
+      LENS_DEV_USER_NAME: ${LENS_DEV_USER_NAME:-}
+      SECRETS_PROXY_URL: ${SECRETS_PROXY_URL:-}
+      SECRETS_PROXY_CLIENT_CERT: ${SECRETS_PROXY_CLIENT_CERT:-}
+      SECRETS_PROXY_CLIENT_KEY: ${SECRETS_PROXY_CLIENT_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  worker-jira:
+    image: ghcr.io/netsmart-tech/lens-backend:${IMAGE_TAG:-latest}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LENS_DEV_AUTH: ${LENS_DEV_AUTH:-0}
+      SECRETS_PROXY_URL: ${SECRETS_PROXY_URL:-}
+      SECRETS_PROXY_CLIENT_CERT: ${SECRETS_PROXY_CLIENT_CERT:-}
+      SECRETS_PROXY_CLIENT_KEY: ${SECRETS_PROXY_CLIENT_KEY:-}
+      # Dev-only static creds passthrough — filtered to LENS_STATIC_*
+      LENS_STATIC_TOPBUILD_JIRA_URL: ${LENS_STATIC_TOPBUILD_JIRA_URL:-}
+      LENS_STATIC_TOPBUILD_JIRA_EMAIL: ${LENS_STATIC_TOPBUILD_JIRA_EMAIL:-}
+      LENS_STATIC_TOPBUILD_JIRA_TOKEN: ${LENS_STATIC_TOPBUILD_JIRA_TOKEN:-}
+    command: ["python", "-m", "lens.workers.jira"]
+    restart: unless-stopped
+
+  frontend:
+    image: ghcr.io/netsmart-tech/lens-frontend:${IMAGE_TAG:-latest}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8101}
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8101}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres_data:

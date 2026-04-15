@@ -1,0 +1,52 @@
+# Environment — only .env.development is tracked (safe defaults)
+.env
+.env.production
+.env.local
+.env.test
+.env.runtime
+
+# Secrets — never commit
+*.pem
+*.key
+*.crt
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+.next/
+frontend/.next/
+frontend/node_modules/
+frontend/tsconfig.tsbuildinfo
+
+# Generated
+backend/openapi.json
+frontend/src/lib/api-client.ts.generated
+
+# Docker
+docker-compose.override.yml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Backups
+backups/

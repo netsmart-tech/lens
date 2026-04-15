@@ -1,0 +1,47 @@
+# =============================================================================
+# Lens — dev overrides (hot reload, source mounted as volumes)
+#
+# Usage: make dev
+#        (or: docker compose --env-file .env.development
+#                            -f docker-compose.yml -f docker-compose.dev.yml up)
+# =============================================================================
+
+services:
+  db:
+    ports:
+      - "${DB_PORT:-5434}:5432"
+
+  backend:
+    volumes:
+      - ./backend:/app
+    command: >
+      sh -c "alembic -x mode=core upgrade head &&
+             alembic -x mode=all upgrade head &&
+             python -m lens.cli.seed_dev &&
+             uvicorn lens.main:app --reload --host 0.0.0.0 --port 8000"
+    ports:
+      - "${BACKEND_PORT:-8101}:8000"
+
+  worker-jira:
+    volumes:
+      - ./backend:/app
+    # dev: run once on startup and exit cleanly; compose restarts the loop
+    command: ["python", "-m", "lens.workers.jira", "--interval", "60"]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/next.config.ts:/app/next.config.ts
+      - ./frontend/tailwind.config.ts:/app/tailwind.config.ts:ro
+      - ./frontend/postcss.config.mjs:/app/postcss.config.mjs:ro
+      - ./frontend/tsconfig.json:/app/tsconfig.json:ro
+      - ./frontend/components.json:/app/components.json:ro
+    ports:
+      - "${FRONTEND_PORT:-3101}:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-8101}
+      WATCHPACK_POLLING: "true"
