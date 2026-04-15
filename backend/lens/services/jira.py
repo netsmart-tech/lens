@@ -63,9 +63,15 @@ class JiraClient:
     def __init__(self, base_url: str, authorization: str):
         self.base_url = base_url.rstrip("/")
         self._client = make_proxy_client(base_url=self.base_url)
+        # `Accept-Encoding: identity` is a deliberate workaround for a
+        # secrets-proxy bug: the proxy decompresses upstream responses but
+        # leaves the `Content-Encoding: gzip` header intact, causing httpx
+        # to try (and fail) to decompress plain JSON as gzip. Removing when
+        # the proxy is fixed. See secrets-proxy repo TODO.
         self._client.headers.update({
             "Authorization": authorization,
             "Accept": "application/json",
+            "Accept-Encoding": "identity",
         })
         self._limiter = _limiter_for(self.base_url)
 

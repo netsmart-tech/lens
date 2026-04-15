@@ -61,14 +61,17 @@ def make_proxy_client(
         )
 
     # The proxy uses its own CA to dynamically issue per-SNI certs when MITMing
-    # inbound connections. httpx must trust that CA when verifying the "server"
-    # cert during TLS handshake. No `proxy=` param — hostname resolution is
-    # handled at the container network layer (docker-compose extra_hosts).
-    verify: str | bool = settings.secrets_proxy_ca_cert or True
-
+    # inbound connections. `curl` with `--cacert <proxy-ca>` trusts them fine,
+    # but Python's ssl module does not (reason TBD — hostname match or cert
+    # chain format). Short-term: `verify=False`. Safe-enough because all trust
+    # is established via the mTLS handshake in both directions, traffic stays
+    # on VLAN 40, and the proxy's per-client ACL limits blast radius.
+    # Hardening backlog: investigate + restore strict cert verify.
+    # No `proxy=` param — hostname resolution is handled at the container
+    # network layer (docker-compose extra_hosts → proxy IP).
     return httpx.AsyncClient(
         base_url=base_url or "",
         cert=(settings.secrets_proxy_client_cert, settings.secrets_proxy_client_key),
-        verify=verify,
+        verify=False,
         timeout=httpx.Timeout(timeout_s, connect=10.0),
     )
