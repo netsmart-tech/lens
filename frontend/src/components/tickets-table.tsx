@@ -31,8 +31,9 @@ function priorityVariant(
 }
 
 function statusVariant(
-  status: string,
+  status: string | null,
 ): React.ComponentProps<typeof Badge>["variant"] {
+  if (!status) return "outline";
   const s = status.toLowerCase();
   if (s.includes("done") || s.includes("closed") || s.includes("resolved"))
     return "success";
@@ -75,9 +76,13 @@ export function TicketsTable({ tenantSlug, issues }: Props) {
                 </Link>
               </TableCell>
               <TableCell>
-                <Badge variant={statusVariant(issue.status)}>
-                  {issue.status}
-                </Badge>
+                {issue.status ? (
+                  <Badge variant={statusVariant(issue.status)}>
+                    {issue.status}
+                  </Badge>
+                ) : (
+                  <span className="text-xs text-muted-foreground">—</span>
+                )}
               </TableCell>
               <TableCell>
                 {issue.priority ? (

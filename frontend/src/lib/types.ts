@@ -55,14 +55,15 @@ export interface ListResponse<T> {
 // --- Jira ---
 
 export interface JiraIssue {
+  site_id: string;
   key: string;
   summary: string;
-  status: string;
+  status: string | null;
   priority: string | null;
   assignee: string | null;
   reporter: string | null;
-  created: string;
-  updated: string;
+  created: string | null;
+  updated: string | null;
 }
 
 export interface JiraComment {

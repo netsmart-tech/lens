@@ -6,22 +6,31 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatDate(date: string | Date): string {
-  return format(new Date(date), "MMM d, yyyy");
+export function formatDate(date: string | Date | null | undefined): string {
+  if (!date) return "—";
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return "—";
+  return format(d, "MMM d, yyyy");
 }
 
-export function formatDateTime(date: string | Date): string {
-  return format(new Date(date), "MMM d, yyyy h:mm a");
+export function formatDateTime(date: string | Date | null | undefined): string {
+  if (!date) return "—";
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return "—";
+  return format(d, "MMM d, yyyy h:mm a");
 }
 
 /**
  * Human-friendly relative time ("3 min ago", "2 days ago"). Used for
- * sync badges, activity timestamps, last-updated columns.
+ * sync badges, activity timestamps, last-updated columns. Null/invalid
+ * inputs render as an em dash — Jira omits timestamps on some ticket
+ * variants and we don't want the whole table crashing for one row.
  */
-export function formatRelative(date: string | Date): string {
+export function formatRelative(date: string | Date | null | undefined): string {
+  if (!date) return "—";
   const d = new Date(date);
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
+  if (isNaN(d.getTime())) return "—";
+  const diffMs = Date.now() - d.getTime();
   if (diffMs < 30_000) return "just now";
   return `${formatDistanceToNowStrict(d)} ago`;
 }
