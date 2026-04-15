@@ -23,12 +23,23 @@ router = APIRouter(prefix="/api/{tenant}", tags=["tickets"])
 async def list_tickets(
     ctx: TenantContext = Depends(resolve_tenant),
     user: User = Depends(require_authenticated),
-    mine_only: bool = True,
 ):
-    """List Jira issues. Defaults to assignee = current user's email."""
+    """List Jira issues for this tenant.
+
+    Phase 1: returns every issue in the tenant's `jira_issues` table. The sync
+    worker already JQL-filters to `assignee = currentUser()` on the Atlassian
+    side — where "currentUser" is the PAT owner, which may live under a
+    different email domain than the Lens login user (e.g. Steve's Lens login
+    is `sjensen@netsmart.tech` but his TopBuild Atlassian is
+    `steven.jensen@topbuild.com`). So every row in the table already IS
+    "my tickets"; app-side filtering on `user.email` would double-scope with
+    the wrong identifier and return zero rows.
+
+    When Lens grows to support multiple Netsmart staff per tenant, we'll add
+    a per-user-per-tenant `atlassian_email` mapping in `lens_core` and restore
+    the filter using that mapping.
+    """
     stmt = select(JiraIssue).order_by(JiraIssue.issue_updated.desc())
-    if mine_only:
-        stmt = stmt.where(JiraIssue.assignee == user.email)
     rows = (await ctx.session.execute(stmt)).scalars().all()
 
     items = [TicketResponse.model_validate(r).model_dump(mode="json") for r in rows]
