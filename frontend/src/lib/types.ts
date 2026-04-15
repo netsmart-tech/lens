@@ -78,6 +78,12 @@ export interface JiraIssueDetail extends JiraIssue {
   comments: JiraComment[];
 }
 
+export interface Transition {
+  id: string;
+  name: string;
+  to_status: string;
+}
+
 // --- Activity ---
 
 export interface Activity {

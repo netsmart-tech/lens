@@ -17,25 +17,33 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import base64
-import os
-import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from lens.config import settings
 from lens.db.engine import get_tenant_engine
 from lens.db.session import get_db  # noqa: F401 (for parity)
 from lens.logging import configure_logging, get_logger
 from lens.models.core.sync_state import SyncState
 from lens.models.core.tenants import Tenant
-from lens.models.tenant.jira_issues import JiraIssue
-from lens.models.tenant.jira_sites import JiraSite
 from lens.services.activities import record_activity
 from lens.services.jira import JiraClient
+from lens.services.jira_tenant import (
+    ensure_site as _ensure_site,
+)
+from lens.services.jira_tenant import (
+    resolve_jira_config as _resolve_jira_config,
+)
+from lens.services.jira_tenant import (
+    upsert_issue as _upsert_issue,
+)
+
+# Re-exports so the worker's public symbol names keep working for any external
+# importers (tests, ops scripts) that already reference `_resolve_jira_config`
+# or `_upsert_issue` via `lens.workers.jira`.
+__all__ = ["_resolve_jira_config", "_upsert_issue", "_ensure_site"]
 
 configure_logging()
 log = get_logger("lens.worker.jira")
@@ -50,86 +58,6 @@ async def _tenant_session(tenant: Tenant) -> AsyncSession:
         execution_options={"schema_translate_map": {"tenant": tenant.schema_name}}
     )
     return session
-
-
-def _resolve_jira_config(slug: str) -> tuple[str, str] | None:
-    """Return (base_url, authorization_header) or None if unconfigured.
-
-    Per-tenant config:
-      - `JIRA_<SLUG>_URL` (env var, sourced from Infisical /apps/lens/) — required.
-      - In prod (secrets_proxy_url set): authorization is the literal placeholder
-        ``Basic {secret:<slug>-jira-api-token}``. The proxy substitutes the stored
-        base64(email:token) blob before forwarding to Atlassian.
-      - In dev (no proxy): authorization is constructed locally from
-        ``LENS_STATIC_<SLUG>_JIRA_EMAIL`` + ``LENS_STATIC_<SLUG>_JIRA_TOKEN``.
-    """
-    slug_env = slug.upper().replace("-", "_")
-    base_url = os.environ.get(f"JIRA_{slug_env}_URL")
-    if not base_url:
-        log.info("jira_skip_no_url", tenant=slug, env_var=f"JIRA_{slug_env}_URL")
-        return None
-
-    if settings.secrets_proxy_url:
-        # Prod: placeholder; proxy substitutes the base64 blob.
-        authorization = f"Basic {{secret:{slug}-jira-api-token}}"
-    else:
-        # Dev fallback — inline encode from LENS_STATIC_* env vars.
-        email = os.environ.get(f"LENS_STATIC_{slug_env}_JIRA_EMAIL")
-        token = os.environ.get(f"LENS_STATIC_{slug_env}_JIRA_TOKEN")
-        if not (email and token):
-            log.info("jira_skip_no_dev_creds", tenant=slug)
-            return None
-        encoded = base64.b64encode(f"{email}:{token}".encode()).decode()
-        authorization = f"Basic {encoded}"
-
-    return base_url, authorization
-
-
-async def _ensure_site(session: AsyncSession, base_url: str) -> JiraSite:
-    stmt = select(JiraSite).where(JiraSite.base_url == base_url)
-    site = (await session.execute(stmt)).scalar_one_or_none()
-    if site is None:
-        site = JiraSite(base_url=base_url, display_name=base_url)
-        session.add(site)
-        await session.flush()
-    return site
-
-
-async def _upsert_issue(session: AsyncSession, site_id: uuid.UUID, issue: dict) -> None:
-    fields = issue.get("fields", {}) or {}
-    assignee = (fields.get("assignee") or {}).get("emailAddress")
-    reporter = (fields.get("reporter") or {}).get("emailAddress")
-    status_name = (fields.get("status") or {}).get("name")
-    priority = (fields.get("priority") or {}).get("name")
-
-    def _parse(ts: str | None) -> datetime | None:
-        if not ts:
-            return None
-        # Jira returns '2026-04-15T12:34:56.789+0000' — fromisoformat handles most variants in 3.11+
-        try:
-            return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-
-    values = {
-        "site_id": site_id,
-        "key": issue["key"],
-        "summary": fields.get("summary") or "",
-        "status": status_name,
-        "priority": priority,
-        "assignee": assignee,
-        "reporter": reporter,
-        "issue_created": _parse(fields.get("created")),
-        "issue_updated": _parse(fields.get("updated")),
-        "raw": issue,
-        "synced_at": datetime.now(UTC),
-    }
-    stmt = pg_insert(JiraIssue).values(**values)
-    stmt = stmt.on_conflict_do_update(
-        index_elements=["site_id", "key"],
-        set_={k: stmt.excluded[k] for k in values if k not in ("site_id", "key")},
-    )
-    await session.execute(stmt)
 
 
 async def sync_tenant(

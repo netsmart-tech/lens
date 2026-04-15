@@ -116,6 +116,22 @@ class JiraClient:
         resp.raise_for_status()
         return resp.json()
 
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(5),
+        wait=wait_exponential_jitter(initial=1, max=30),
+        retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.TransportError)),
+    )
+    async def _post_no_content(self, path: str, json_body: dict) -> None:
+        """POST for endpoints that return 204 No Content (e.g. transitions)."""
+        async with self._limiter:
+            resp = await self._client.post(path, json=json_body)
+        if resp.status_code == 429:
+            retry_after = int(resp.headers.get("Retry-After", "0") or 0)
+            if retry_after:
+                await asyncio.sleep(retry_after)
+        resp.raise_for_status()
+
     # ---- high-level ops -----------------------------------------------------
 
     async def search_issues(
@@ -141,8 +157,9 @@ class JiraClient:
             body["nextPageToken"] = next_page_token
         return await self._post("/rest/api/3/search/jql", json_body=body)
 
-    async def get_issue(self, key: str) -> dict:
-        return await self._get(f"/rest/api/3/issue/{key}")
+    async def get_issue(self, key: str, fields: list[str] | None = None) -> dict:
+        params = {"fields": ",".join(fields)} if fields else None
+        return await self._get(f"/rest/api/3/issue/{key}", params=params)
 
     async def list_comments(self, key: str, start_at: int = 0, max_results: int = 100) -> dict:
         return await self._get(
@@ -161,3 +178,44 @@ class JiraClient:
             f"/rest/api/3/issue/{key}/worklog",
             params={"startAt": start_at, "maxResults": max_results},
         )
+
+    # ---- mutations ----------------------------------------------------------
+
+    async def add_comment(self, key: str, adf_body: dict) -> dict:
+        """POST a comment to an issue. `adf_body` must already be an ADF doc."""
+        return await self._post(
+            f"/rest/api/3/issue/{key}/comment", json_body={"body": adf_body}
+        )
+
+    async def list_transitions(self, key: str) -> dict:
+        """Available workflow transitions for the issue, given the auth'd user."""
+        return await self._get(f"/rest/api/3/issue/{key}/transitions")
+
+    async def do_transition(self, key: str, transition_id: str) -> None:
+        """Apply a workflow transition. Jira returns 204 No Content on success."""
+        await self._post_no_content(
+            f"/rest/api/3/issue/{key}/transitions",
+            json_body={"transition": {"id": transition_id}},
+        )
+
+
+# ---- ADF helpers -----------------------------------------------------------
+
+
+def plain_text_to_adf(text: str) -> dict:
+    """Wrap a plain-text string into a minimal Atlassian Document Format doc.
+
+    Split on blank lines (`\\n\\n`) into paragraph nodes. Single newlines stay
+    inside one paragraph — Jira renders those as soft line breaks. Intentionally
+    minimal: no bold/italic/lists in Phase 1. Inverse of `_adf_to_text` in
+    `routers/tickets.py` for round-trippable read-modify-write.
+    """
+    paras = [p for p in text.split("\n\n") if p.strip()]
+    return {
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": p}]}
+            for p in paras
+        ],
+    }

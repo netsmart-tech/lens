@@ -14,8 +14,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CommentComposer } from "@/components/comment-composer";
+import { StatusTransitionMenu } from "@/components/status-transition-menu";
 import { api, ApiError } from "@/lib/api";
-import type { JiraIssueDetail } from "@/lib/types";
+import type { JiraComment, JiraIssueDetail } from "@/lib/types";
 import { formatDateTime, formatRelative } from "@/lib/utils";
 
 interface Params {
@@ -81,7 +83,12 @@ export default function TicketDetailPage({ params }: Params) {
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <code className="font-mono">{issue.key}</code>
                 <span>•</span>
-                <Badge variant="secondary">{issue.status}</Badge>
+                <StatusTransitionMenu
+                  tenant={tenant}
+                  issueKey={issue.key}
+                  status={issue.status}
+                  onTransitioned={(updated) => setIssue(updated)}
+                />
                 {issue.priority && (
                   <Badge variant="outline">{issue.priority}</Badge>
                 )}
@@ -133,6 +140,25 @@ export default function TicketDetailPage({ params }: Params) {
                   </div>
                 ))
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Add a comment</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CommentComposer
+                tenant={tenant}
+                issueKey={issue.key}
+                onCommentAdded={(comment: JiraComment) =>
+                  setIssue((prev) =>
+                    prev
+                      ? { ...prev, comments: [...prev.comments, comment] }
+                      : prev,
+                  )
+                }
+              />
             </CardContent>
           </Card>
         </>

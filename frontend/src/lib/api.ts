@@ -2,10 +2,12 @@ import type {
   ApiErrorBody,
   Activity,
   AuthMe,
+  JiraComment,
   JiraIssue,
   JiraIssueDetail,
   ListResponse,
   Tenant,
+  Transition,
 } from "./types";
 
 /**
@@ -72,6 +74,26 @@ export const api = {
   },
   getTicket: (tenant: string, key: string) =>
     request<JiraIssueDetail>(`/api/${tenant}/tickets/${encodeURIComponent(key)}`),
+  postComment: (tenant: string, key: string, body: string) =>
+    request<JiraComment>(
+      `/api/${tenant}/tickets/${encodeURIComponent(key)}/comments`,
+      {
+        method: "POST",
+        body: JSON.stringify({ body }),
+      },
+    ),
+  listTransitions: (tenant: string, key: string) =>
+    request<{ transitions: Transition[] }>(
+      `/api/${tenant}/tickets/${encodeURIComponent(key)}/transitions`,
+    ),
+  applyTransition: (tenant: string, key: string, transitionId: string) =>
+    request<JiraIssueDetail>(
+      `/api/${tenant}/tickets/${encodeURIComponent(key)}/transitions`,
+      {
+        method: "POST",
+        body: JSON.stringify({ transition_id: transitionId }),
+      },
+    ),
 
   // --- Activity ---
   listActivity: (tenant: string) =>

@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from lens.schemas.sync import SyncBlock
 
@@ -47,3 +46,36 @@ class TicketDetailResponse(TicketResponse):
 class TicketListResponse(BaseModel):
     items: list[TicketResponse]
     sync: SyncBlock
+
+
+# ---- mutation shapes --------------------------------------------------------
+
+
+class CommentCreateRequest(BaseModel):
+    """Plain-text comment body. Router wraps it into ADF before posting to Jira."""
+
+    body: str = Field(..., min_length=1)
+
+    @field_validator("body")
+    @classmethod
+    def _strip_nonblank(cls, v: str) -> str:
+        # Reject all-whitespace payloads even though min_length=1 alone would allow " ".
+        if not v.strip():
+            raise ValueError("body must contain non-whitespace text")
+        return v
+
+
+class TransitionResponse(BaseModel):
+    """One available workflow transition, reshaped from Jira's response."""
+
+    id: str
+    name: str
+    to_status: str
+
+
+class TransitionListResponse(BaseModel):
+    transitions: list[TransitionResponse]
+
+
+class TransitionApplyRequest(BaseModel):
+    transition_id: str = Field(..., min_length=1)
