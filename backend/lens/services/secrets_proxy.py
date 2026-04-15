@@ -5,7 +5,7 @@ placeholders against `LENS_STATIC_*` environment variables. This is the Phase 1
 path — no mTLS, no network call.
 
 Prod path (Phase 2): mTLS GET to `secrets-proxy.netsmart.tech` with the
-portal-prod client cert. STUBBED below — real implementation comes when the
+lens-prod client cert. STUBBED below — real implementation comes when the
 cert is issued and the VLAN 20 → VLAN 40 policy is applied (Turtle).
 """
 
@@ -69,7 +69,7 @@ async def get_secret(name: str) -> str:
         return val
 
     # TODO(Phase 2): mTLS GET to secrets-proxy.netsmart.tech.
-    # Blocked on: portal-prod cert issuance + VLAN 20→40 FortiGate policy.
+    # Blocked on: lens-prod cert issuance + VLAN 20→40 FortiGate policy.
     raise NotImplementedError(
         "Real mTLS secrets-proxy client is Phase 2. "
         "Clear SECRETS_PROXY_URL to fall back to LENS_STATIC_* env vars."

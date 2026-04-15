@@ -12,7 +12,7 @@ from lens.db.engine import get_session_factory
 async def get_db() -> AsyncIterator[AsyncSession]:
     """FastAPI dependency — yields a core-only AsyncSession.
 
-    Use this for endpoints that only read/write `portal_core.*` (auth, tenant
+    Use this for endpoints that only read/write `lens_core.*` (auth, tenant
     list, etc). For per-tenant endpoints, use `resolve_tenant` from db.tenant.
     """
     factory = get_session_factory()

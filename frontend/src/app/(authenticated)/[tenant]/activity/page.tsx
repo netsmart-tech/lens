@@ -66,7 +66,7 @@ export default function ActivityPage({ params }: PageParams) {
           <CardTitle className="text-base">Timeline</CardTitle>
           <CardDescription>
             Most recent first. Source-agnostic normalization lives in
-            portal_core.activities.
+            lens_core.activities.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -82,7 +82,7 @@ export default function ActivityPage({ params }: PageParams) {
               }
               description={
                 data.sync.state === "never-synced"
-                  ? "Activity lights up as sync workers populate portal_core.activities."
+                  ? "Activity lights up as sync workers populate lens_core.activities."
                   : "Events will appear here as work happens."
               }
               action={

@@ -6,7 +6,7 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Lens — Netsmart",
-  description: "Netsmart client portal",
+  description: "Netsmart multi-client consulting workspace",
   robots: { index: false, follow: false },
 };
 

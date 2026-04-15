@@ -63,16 +63,16 @@ def _run_migrations(async_database_url: str) -> None:
         try:
             async with engine.begin() as conn:
                 for slug in FIXTURE_TENANTS:
-                    await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "portal_{slug}"'))
+                    await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "lens_{slug}"'))
                     await conn.execute(
                         text(
                             """
-                            INSERT INTO portal_core.tenants (id, slug, name, schema_name)
+                            INSERT INTO lens_core.tenants (id, slug, name, schema_name)
                             VALUES (gen_random_uuid(), :slug, :name, :schema)
                             ON CONFLICT (slug) DO NOTHING
                             """
                         ),
-                        {"slug": slug, "name": slug, "schema": f"portal_{slug}"},
+                        {"slug": slug, "name": slug, "schema": f"lens_{slug}"},
                     )
         finally:
             await engine.dispose()
@@ -118,7 +118,7 @@ async def tenant_session_factory(async_database_url: str):
     async def _get(slug: str) -> AsyncSession:
         session = AsyncSession(bind=engine, expire_on_commit=False)
         await session.connection(
-            execution_options={"schema_translate_map": {"tenant": f"portal_{slug}"}}
+            execution_options={"schema_translate_map": {"tenant": f"lens_{slug}"}}
         )
         return session
 

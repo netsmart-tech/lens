@@ -46,7 +46,7 @@ export default function LoginPage() {
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">Lens</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Netsmart client portal
+            Netsmart consulting workspace
           </p>
         </div>
 

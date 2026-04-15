@@ -1,6 +1,6 @@
 """Critical: prove that `schema_translate_map` actually isolates tenants.
 
-Insert distinct jira_issues rows into `portal_test_alpha` and `portal_test_beta`,
+Insert distinct jira_issues rows into `lens_test_alpha` and `lens_test_beta`,
 then query each through a tenant-scoped session and assert no bleed-through.
 """
 

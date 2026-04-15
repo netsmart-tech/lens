@@ -6,7 +6,7 @@ Revises: 0001
 Create Date: 2026-04-15
 
 Runs under `-x mode=tenant:<slug>`; env.py installs a schema_translate_map
-{tenant: portal_<slug>} so `schema="tenant"` below is rewritten at execution
+{tenant: lens_<slug>} so `schema="tenant"` below is rewritten at execution
 time to the caller's tenant schema.
 """
 

@@ -1,4 +1,4 @@
-"""`record_activity` — idempotent INSERT to `portal_core.activities`.
+"""`record_activity` — idempotent INSERT to `lens_core.activities`.
 
 Per Teo §9: use a single `dedup_key` column + `ON CONFLICT (tenant_id, source,
 dedup_key) DO NOTHING` for idempotent re-sync.

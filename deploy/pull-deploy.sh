@@ -38,7 +38,7 @@ fi
 
 # --- Sanity: DATABASE_URL must be set (external loyd-pg) ---
 if [[ -z "${DATABASE_URL:-}" || "$DATABASE_URL" == CHANGEME-* ]]; then
-    echo "ERROR: DATABASE_URL is unset or placeholder. Ensure portal_app role exists on loyd-pg"
+    echo "ERROR: DATABASE_URL is unset or placeholder. Ensure lens_app role exists on loyd-pg"
     echo "       and /apps/lens/DATABASE_URL + DB_PASSWORD are set in Infisical."
     exit 1
 fi
@@ -46,15 +46,15 @@ fi
 mkdir -p "$BACKUP_DIR"
 
 # --- Pre-deploy backup: per-tenant schema dump against external loyd-pg ---
-# Backup every portal_* schema individually so restore can be scoped to one
+# Backup every lens_* schema individually so restore can be scoped to one
 # client if needed. Uses DATABASE_URL from .env.runtime — read-only operation.
 echo "==> Pre-deploy backup: per-tenant schemas on loyd-pg..."
 TS="$(date +%Y%m%d-%H%M%S)"
 SCHEMAS="$(psql "$DATABASE_URL" -At -c \
-    "SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE 'portal%' ORDER BY schema_name;")"
+    "SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE 'lens%' ORDER BY schema_name;")"
 
 if [[ -z "$SCHEMAS" ]]; then
-    echo "    WARNING: no portal_* schemas found on loyd-pg — first deploy? skipping backup."
+    echo "    WARNING: no lens schemas found on loyd-pg — first deploy? skipping backup."
 else
     for schema in $SCHEMAS; do
         OUT="${BACKUP_DIR}/${schema}-${TS}.sql.gz"

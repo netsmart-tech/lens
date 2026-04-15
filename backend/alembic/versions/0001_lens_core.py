@@ -1,4 +1,4 @@
-"""portal_core baseline — tenants, users, user_tenants, activities, sync_state, reports, audit_log.
+"""lens_core baseline — tenants, users, user_tenants, activities, sync_state, reports, audit_log.
 
 Revision ID: 0001
 Revises:
@@ -17,7 +17,7 @@ branch_labels = None
 depends_on = None
 
 
-SCHEMA = "portal_core"
+SCHEMA = "lens_core"
 
 
 def _phase() -> str | None:

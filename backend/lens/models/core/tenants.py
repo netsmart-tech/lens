@@ -1,4 +1,4 @@
-"""portal_core.tenants — tenant registry."""
+"""lens_core.tenants — tenant registry."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from lens.db.base import CoreBase
 
 class Tenant(CoreBase):
     __tablename__ = "tenants"
-    __table_args__ = {"schema": "portal_core"}
+    __table_args__ = {"schema": "lens_core"}
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")

@@ -1,4 +1,4 @@
-"""portal_core.reports — generated client reports (Phase 3 populates)."""
+"""lens_core.reports — generated client reports (Phase 3 populates)."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ class Report(CoreBase):
     __tablename__ = "reports"
     __table_args__ = (
         Index("ix_reports_tenant_period", "tenant_id", "period_end"),
-        {"schema": "portal_core"},
+        {"schema": "lens_core"},
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -24,14 +24,14 @@ class Report(CoreBase):
     )
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("portal_core.tenants.id", ondelete="CASCADE"),
+        ForeignKey("lens_core.tenants.id", ondelete="CASCADE"),
         nullable=False,
     )
     template: Mapped[str] = mapped_column(String(128), nullable=False)
     period_start: Mapped[date] = mapped_column(Date, nullable=False)
     period_end: Mapped[date] = mapped_column(Date, nullable=False)
     author: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("portal_core.users.id"), nullable=True
+        UUID(as_uuid=True), ForeignKey("lens_core.users.id"), nullable=True
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     markdown_ref: Mapped[str | None] = mapped_column(String(1024), nullable=True)

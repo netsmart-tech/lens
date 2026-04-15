@@ -7,7 +7,7 @@ Run:
 Phase 1 scope:
 - Loop over all tenants with a sync_state row for source='jira'.
 - On first run for a tenant (no sync_state row yet), start in 'backfill'.
-- Dual-write raw jira_issues + portal_core.activities in one transaction,
+- Dual-write raw jira_issues + lens_core.activities in one transaction,
   using ON CONFLICT (dedup_key) DO NOTHING for idempotency.
 - Log via structlog.
 - Gracefully skip tenants whose Jira secret isn't configured.

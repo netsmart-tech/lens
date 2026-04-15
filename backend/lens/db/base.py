@@ -2,9 +2,9 @@
 
 Two bases so Alembic can target them independently per invocation mode:
 
-- `CoreBase`: tables in `portal_core` schema (always resolved literally).
+- `CoreBase`: tables in `lens_core` schema (always resolved literally).
 - `TenantBase`: per-tenant tables. Declared with `schema="tenant"` as a
-  placeholder — at query time `schema_translate_map={"tenant": "portal_<slug>"}`
+  placeholder — at query time `schema_translate_map={"tenant": "lens_<slug>"}`
   rewrites this to the caller's tenant schema.
 """
 
@@ -14,7 +14,7 @@ from sqlalchemy.orm import DeclarativeBase
 
 
 class CoreBase(DeclarativeBase):
-    """Declarative base for `portal_core.*` tables."""
+    """Declarative base for `lens_core.*` tables."""
 
 
 class TenantBase(DeclarativeBase):
@@ -22,5 +22,5 @@ class TenantBase(DeclarativeBase):
 
     All tables declared against this base MUST set
     `__table_args__ = {"schema": "tenant"}` so that `schema_translate_map`
-    can rewrite `tenant` to the runtime `portal_<slug>` schema.
+    can rewrite `tenant` to the runtime `lens_<slug>` schema.
     """

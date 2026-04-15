@@ -1,7 +1,7 @@
 [project]
 name = "lens"
 version = "0.1.0"
-description = "Lens — Netsmart client portal backend"
+description = "Lens — Netsmart multi-client consulting app backend"
 requires-python = ">=3.11"
 readme = "README.md"
 dependencies = [

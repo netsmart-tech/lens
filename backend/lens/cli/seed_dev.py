@@ -31,7 +31,7 @@ async def _seed() -> None:
 
     # Ensure schema exists before migrations run.
     async with engine.begin() as conn:
-        await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "portal_{TOPBUILD["slug"]}"'))
+        await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "lens_{TOPBUILD["slug"]}"'))
 
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
@@ -43,7 +43,7 @@ async def _seed() -> None:
             tenant = Tenant(
                 slug=TOPBUILD["slug"],
                 name=TOPBUILD["name"],
-                schema_name=f"portal_{TOPBUILD['slug']}",
+                schema_name=f"lens_{TOPBUILD['slug']}",
                 color_hex=TOPBUILD["color"],
             )
             session.add(tenant)

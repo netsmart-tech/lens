@@ -1,4 +1,4 @@
-"""portal_core.users — portal users (OIDC-linked)."""
+"""lens_core.users — Lens users (OIDC-linked)."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from lens.db.base import CoreBase
 
 class User(CoreBase):
     __tablename__ = "users"
-    __table_args__ = {"schema": "portal_core"}
+    __table_args__ = {"schema": "lens_core"}
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")

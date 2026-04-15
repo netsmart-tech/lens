@@ -8,4 +8,4 @@ This directory will hold the production deploy pipeline for Lens:
 
 Populated in Phase 2 when we deploy to VM 121 (172.16.20.11).
 
-See `teams/netsmart/apps/portal/DESIGN.md` §7 for the full deployment architecture and `outputs/configs/vince-portal-architecture-recommendation.md` for rationale.
+See `teams/netsmart/apps/lens/DESIGN.md` §7 for the full deployment architecture and `outputs/configs/vince-portal-architecture-recommendation.md` for rationale (historical review artifact; retains its original filename).

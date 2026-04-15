@@ -62,7 +62,7 @@ async def resolve_tenant(
 
     The session's connection is configured with `schema_translate_map` so that
     every query referring to `schema="tenant"` is rewritten to the tenant's
-    `portal_<slug>` schema. The map is applied at checkout and scoped to this
+    `lens_<slug>` schema. The map is applied at checkout and scoped to this
     session's lifecycle — no pool contamination.
     """
     row = await _load_tenant(tenant, core_db, user)
@@ -81,7 +81,7 @@ async def resolve_tenant(
             execution_options={
                 "schema_translate_map": {
                     "tenant": row.schema_name,
-                    # portal_core stays as-is; it's already fully-qualified in the models.
+                    # lens_core stays as-is; it's already fully-qualified in the models.
                 }
             }
         )

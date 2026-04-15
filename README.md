@@ -1,6 +1,6 @@
 # Lens
 
-Netsmart's multi-client consulting portal. Select a client, see everything Netsmart touches for them — Jira, FortiGate (later), network metrics (later) — and auto-generate client-facing work-summary reports.
+Netsmart's multi-client consulting workspace. Select a client, see everything Netsmart touches for them — Jira, FortiGate (later), network metrics (later) — and auto-generate client-facing work-summary reports.
 
 ## Stack
 
@@ -44,7 +44,7 @@ make migrate-tenant slug=topbuild         # run migrations for one tenant
 
 ## Design
 
-See `teams/netsmart/apps/portal/DESIGN.md` (v2) in the Loyd tree for full architecture + specialist reviews.
+See `teams/netsmart/apps/lens/DESIGN.md` (v2) in the Loyd tree for full architecture + specialist reviews.
 
 ## License
 

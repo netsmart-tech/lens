@@ -1,3 +1,3 @@
-"""Lens — Netsmart client portal backend."""
+"""Lens — Netsmart multi-client consulting backend."""
 
 __version__ = "0.1.0"

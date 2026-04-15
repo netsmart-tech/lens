@@ -27,7 +27,7 @@ ENABLED_SOURCES = ["jira"]  # Phase 1
 
 
 async def _add_tenant(slug: str, name: str, color: str | None) -> int:
-    schema_name = f"portal_{slug}"
+    schema_name = f"lens_{slug}"
     engine = get_engine()
 
     async with engine.begin() as conn:

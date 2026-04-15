@@ -1,4 +1,4 @@
-"""portal_core.activities — unified cross-source activity stream."""
+"""lens_core.activities — unified cross-source activity stream."""
 
 from __future__ import annotations
 
@@ -19,13 +19,13 @@ class Activity(CoreBase):
         UniqueConstraint("tenant_id", "source", "dedup_key", name="uq_activities_dedup"),
         Index("ix_activities_tenant_occurred", "tenant_id", "occurred_at"),
         Index("ix_activities_tenant_source_occurred", "tenant_id", "source", "occurred_at"),
-        {"schema": "portal_core"},
+        {"schema": "lens_core"},
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("portal_core.tenants.id", ondelete="CASCADE"),
+        ForeignKey("lens_core.tenants.id", ondelete="CASCADE"),
         nullable=False,
     )
     source: Mapped[str] = mapped_column(String(64), nullable=False)

@@ -1,7 +1,7 @@
 """Alembic environment — supports three invocation modes via `-x mode=...`.
 
-    -x mode=core               migrate portal_core schema
-    -x mode=tenant:<slug>      migrate one tenant schema (portal_<slug>)
+    -x mode=core               migrate lens_core schema
+    -x mode=tenant:<slug>      migrate one tenant schema (lens_<slug>)
     -x mode=all                core first, then every registered tenant
 
 Each tenant carries its own `alembic_version` table inside its own schema
@@ -54,7 +54,7 @@ def _do_run_migrations_core(connection) -> None:
         connection=connection,
         target_metadata=CoreBase.metadata,
         version_table="alembic_version",
-        version_table_schema="portal_core",
+        version_table_schema="lens_core",
         include_schemas=True,
         include_object=_include_core_only,
     )
@@ -64,19 +64,19 @@ def _do_run_migrations_core(connection) -> None:
     context.config.attributes["tenant_slug"] = None
     with context.begin_transaction():
         # Ensure schema exists inside the transaction so it commits with the rest.
-        connection.execute(text('CREATE SCHEMA IF NOT EXISTS "portal_core"'))
+        connection.execute(text('CREATE SCHEMA IF NOT EXISTS "lens_core"'))
         context.run_migrations()
 
 
 def _include_core_only(obj, name, type_, reflected, compare_to):
-    # Only emit DDL for portal_core.* tables in core mode.
+    # Only emit DDL for lens_core.* tables in core mode.
     if type_ == "table":
-        return obj.schema == "portal_core"
+        return obj.schema == "lens_core"
     return True
 
 
 def _do_run_migrations_tenant(connection, slug: str) -> None:
-    schema = f"portal_{slug}"
+    schema = f"lens_{slug}"
     connection = connection.execution_options(
         schema_translate_map={"tenant": schema, None: schema}
     )
@@ -114,7 +114,7 @@ async def _run_all() -> None:
     # First: core. Then: every tenant.
     await _run_async(_do_run_migrations_core)
 
-    # Discover tenants from portal_core.tenants. If the table doesn't exist
+    # Discover tenants from lens_core.tenants. If the table doesn't exist
     # yet (fresh DB + mode=all), core migrations just created it so this works.
     from sqlalchemy import select
 

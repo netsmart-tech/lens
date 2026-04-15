@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Lens — Netsmart Client Portal API",
+    title="Lens — Netsmart Consulting API",
     version="0.1.0",
     lifespan=lifespan,
 )

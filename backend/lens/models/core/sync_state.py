@@ -1,4 +1,4 @@
-"""portal_core.sync_state — per-(tenant, source) watermark + status."""
+"""lens_core.sync_state — per-(tenant, source) watermark + status."""
 
 from __future__ import annotations
 
@@ -14,11 +14,11 @@ from lens.db.base import CoreBase
 
 class SyncState(CoreBase):
     __tablename__ = "sync_state"
-    __table_args__ = {"schema": "portal_core"}
+    __table_args__ = {"schema": "lens_core"}
 
     tenant_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("portal_core.tenants.id", ondelete="CASCADE"),
+        ForeignKey("lens_core.tenants.id", ondelete="CASCADE"),
         primary_key=True,
     )
     source: Mapped[str] = mapped_column(String(64), primary_key=True)
