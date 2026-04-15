@@ -16,6 +16,12 @@ services:
     depends_on: !reset []
     ports:
       - "${BACKEND_PORT:-8100}:8000"
+    # Pass Infisical-rendered vars + non-secret prod config through to the
+    # container. Base compose's `environment:` block wins on overlapping keys;
+    # env_file covers everything else (per-tenant JIRA_*_URL, CA cert path, etc).
+    env_file:
+      - .env.runtime
+      - .env.prod
     volumes:
       - /etc/lens/secrets-proxy.crt:/etc/lens/secrets-proxy.crt:ro
       - /etc/lens/secrets-proxy.key:/etc/lens/secrets-proxy.key:ro
@@ -38,6 +44,9 @@ services:
   worker-jira:
     restart: unless-stopped
     depends_on: !reset []
+    env_file:
+      - .env.runtime
+      - .env.prod
     volumes:
       - /etc/lens/secrets-proxy.crt:/etc/lens/secrets-proxy.crt:ro
       - /etc/lens/secrets-proxy.key:/etc/lens/secrets-proxy.key:ro
