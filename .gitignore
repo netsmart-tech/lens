@@ -22,6 +22,7 @@ venv/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+.cache/
 
 # Node
 node_modules/
