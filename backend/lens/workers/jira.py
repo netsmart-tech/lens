@@ -175,7 +175,22 @@ async def sync_tenant(
         async with JiraClient(base_url, authorization) as client:
             page = await client.search_issues(
                 jql=jql,
-                fields=["summary", "status", "priority", "assignee", "reporter", "created", "updated"],
+                fields=[
+                    "summary",
+                    "status",
+                    "priority",
+                    "assignee",
+                    "reporter",
+                    "created",
+                    "updated",
+                    # Fetched for the detail page — ADF JSON; we flatten to
+                    # text at render time via lens.routers.tickets._adf_to_text.
+                    "description",
+                    # Inline comments — Jira caps this at 5 per issue; for full
+                    # coverage we'll later pull /rest/api/3/issue/{key}/comment
+                    # separately. Phase 1: show the first 5 on detail pages.
+                    "comment",
+                ],
                 max_results=100,
             )
 
