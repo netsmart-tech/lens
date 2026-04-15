@@ -11,6 +11,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from lens.schemas.sync import SyncBlock
 
 
+class CommentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    author: str | None = None
+    body: str
+    created: datetime
+
+
 class TicketResponse(BaseModel):
     # The ORM columns are named `issue_created` / `issue_updated` (to avoid
     # colliding with Python/SQLAlchemy reserved names) but the frontend
@@ -31,7 +40,8 @@ class TicketResponse(BaseModel):
 
 
 class TicketDetailResponse(TicketResponse):
-    raw: dict[str, Any] | None = None
+    description: str | None = None
+    comments: list[CommentResponse] = Field(default_factory=list)
 
 
 class TicketListResponse(BaseModel):

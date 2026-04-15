@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 
 from lens.auth.deps import require_authenticated
 from lens.db.tenant import TenantContext, resolve_tenant
 from lens.models.core.users import User
+from lens.models.tenant.jira_comments import JiraComment
 from lens.models.tenant.jira_issues import JiraIssue
 from lens.schemas.tickets import (
+    CommentResponse,
     TicketDetailResponse,
     TicketListResponse,
     TicketResponse,
@@ -17,6 +21,34 @@ from lens.schemas.tickets import (
 from lens.services.sync_envelope import with_sync_envelope
 
 router = APIRouter(prefix="/api/{tenant}", tags=["tickets"])
+
+
+def _adf_to_text(node: Any) -> str:
+    """Flatten an Atlassian Document Format node to plain text.
+
+    Jira Cloud stores ticket descriptions + comments as ADF JSON trees.
+    This walker concatenates text nodes with paragraph-respecting newlines —
+    loses tables/code-block fidelity but renders readable prose for the
+    detail page. Upgrade path: call Jira with ?expand=renderedFields for
+    server-rendered HTML, or add a proper ADF renderer frontend-side.
+    """
+    if node is None:
+        return ""
+    if isinstance(node, str):
+        return node
+    if isinstance(node, list):
+        return "".join(_adf_to_text(n) for n in node)
+    if not isinstance(node, dict):
+        return ""
+    t = node.get("type")
+    out = ""
+    if t == "text":
+        out = node.get("text") or ""
+    else:
+        out = _adf_to_text(node.get("content"))
+    if t in {"paragraph", "heading", "bulletList", "orderedList", "listItem", "codeBlock"}:
+        out += "\n"
+    return out
 
 
 @router.get("/tickets", response_model=TicketListResponse)
@@ -49,14 +81,39 @@ async def list_tickets(
     return envelope
 
 
-@router.get("/tickets/{site_id}/{key}", response_model=TicketDetailResponse)
+@router.get("/tickets/{key}", response_model=TicketDetailResponse)
 async def get_ticket(
-    site_id: str,
     key: str,
     ctx: TenantContext = Depends(resolve_tenant),
+    _user: User = Depends(require_authenticated),
 ):
-    stmt = select(JiraIssue).where(JiraIssue.site_id == site_id, JiraIssue.key == key)
+    """Get a single ticket by key. Within a tenant, Jira issue keys are
+    globally unique across any jira_sites rows (Atlassian namespaces by
+    project prefix), so we don't need a site_id in the URL.
+
+    Returns issue metadata + description (flattened from ADF) + comments
+    (empty today — the worker doesn't sync comments yet; schema is
+    ready for when it does).
+    """
+    stmt = select(JiraIssue).where(JiraIssue.key == key)
     row = (await ctx.session.execute(stmt)).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-    return row
+
+    description: str | None = None
+    if row.raw:
+        fields = (row.raw or {}).get("fields") or {}
+        description = _adf_to_text(fields.get("description")).strip() or None
+
+    comments_rows = (
+        await ctx.session.execute(
+            select(JiraComment)
+            .where(JiraComment.site_id == row.site_id, JiraComment.issue_key == key)
+            .order_by(JiraComment.created.asc())
+        )
+    ).scalars().all()
+    comments = [CommentResponse.model_validate(c) for c in comments_rows]
+
+    return TicketDetailResponse.model_validate(row).model_copy(
+        update={"description": description, "comments": comments}
+    )
