@@ -162,11 +162,15 @@ async def sync_tenant(
 
         site = await _ensure_site(session, base_url)
 
-        jql_parts = []
+        # Atlassian's new /search/jql endpoint rejects unbounded queries with
+        # "Unbounded JQL queries are not allowed here." — we always restrict
+        # to tickets assigned to the auth'd user (matches DESIGN §1: Lens
+        # shows "my tickets"). On incremental passes we also bound by updated.
+        jql_parts = ["assignee = currentUser()"]
         if mode == "incremental" and ss.cursor:
             # 5-min overlap per Teo §10
             jql_parts.append(f'updated >= "{ss.cursor}"')
-        jql = " AND ".join(jql_parts) + (" ORDER BY updated ASC" if jql_parts else "ORDER BY updated ASC")
+        jql = " AND ".join(jql_parts) + " ORDER BY updated ASC"
 
         async with JiraClient(base_url, authorization) as client:
             page = await client.search_issues(
