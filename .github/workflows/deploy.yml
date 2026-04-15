@@ -1,0 +1,203 @@
+name: Lens CI / Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: "Skip test stage (emergency deploys only)"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+concurrency:
+  group: deploy-lens-production
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Stage 1: Backend tests (pytest + testcontainers Postgres)
+  # ---------------------------------------------------------------------------
+  test-backend:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: ${{ github.event.inputs.skip_tests != 'true' }}
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('backend/pyproject.toml') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e '.[dev]'
+
+      - name: Run pytest (testcontainers spins up Postgres)
+        env:
+          ENVIRONMENT: "test"
+        run: pytest -v --tb=short
+
+  # ---------------------------------------------------------------------------
+  # Stage 2: Frontend typecheck + lint
+  # ---------------------------------------------------------------------------
+  test-frontend:
+    name: Frontend Typecheck + Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: ${{ github.event.inputs.skip_tests != 'true' }}
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+  # ---------------------------------------------------------------------------
+  # Stage 3: Build + push images to GHCR (only on push to main)
+  # Registry: ghcr.io/netsmart-tech/lens-{backend,frontend}
+  # Backend image is reused for the worker-jira service at runtime.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [test-backend, test-frontend]
+    if: |
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      always() &&
+      (needs.test-backend.result == 'success' || needs.test-backend.result == 'skipped') &&
+      (needs.test-frontend.result == 'success' || needs.test-frontend.result == 'skipped')
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Docker layers (backend)
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-backend
+          key: buildx-backend-${{ runner.os }}-${{ hashFiles('backend/Dockerfile', 'backend/pyproject.toml') }}
+          restore-keys: |
+            buildx-backend-${{ runner.os }}-
+
+      - name: Cache Docker layers (frontend)
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-frontend
+          key: buildx-frontend-${{ runner.os }}-${{ hashFiles('frontend/Dockerfile', 'frontend/package-lock.json') }}
+          restore-keys: |
+            buildx-frontend-${{ runner.os }}-
+
+      - name: Build + push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/netsmart-tech/lens-backend:${{ github.sha }}
+            ghcr.io/netsmart-tech/lens-backend:latest
+          cache-from: type=local,src=/tmp/.buildx-cache-backend
+          cache-to: type=local,dest=/tmp/.buildx-cache-backend-new,mode=max
+
+      - name: Build + push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/netsmart-tech/lens-frontend:${{ github.sha }}
+            ghcr.io/netsmart-tech/lens-frontend:latest
+          build-args: |
+            NEXT_PUBLIC_API_URL=https://lens.netsmart.tech
+          cache-from: type=local,src=/tmp/.buildx-cache-frontend
+          cache-to: type=local,dest=/tmp/.buildx-cache-frontend-new,mode=max
+
+      - name: Rotate build cache
+        run: |
+          rm -rf /tmp/.buildx-cache-backend /tmp/.buildx-cache-frontend
+          mv /tmp/.buildx-cache-backend-new /tmp/.buildx-cache-backend
+          mv /tmp/.buildx-cache-frontend-new /tmp/.buildx-cache-frontend
+
+  # ---------------------------------------------------------------------------
+  # Stage 4: Deploy — disabled in CI (GitHub cannot reach VM 121 directly)
+  # Drama triggers pull-deploy.sh manually after images land in GHCR.
+  # Re-enable when a self-hosted runner or VPN to VLAN 20 is available.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to VM 121
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: build
+    if: false  # Disabled — production host not reachable from GitHub Actions (mirror billing)
+
+    steps:
+      - name: SSH + pull-deploy
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: sudo /srv/lens/deploy/pull-deploy.sh
+
+      - name: Report deploy commit
+        if: success()
+        run: |
+          echo "Deployed commit: ${{ github.sha }}"
+          echo "Branch: ${{ github.ref_name }}"

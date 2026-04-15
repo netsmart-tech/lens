@@ -1,0 +1,55 @@
+# =============================================================================
+# Lens — production overrides (hardened, external loyd-pg, mTLS cert mounts)
+#
+# Usage: docker compose --env-file .env.runtime -f docker-compose.yml -f docker-compose.prod.yml up -d
+# Or:    /srv/lens/deploy/pull-deploy.sh
+# =============================================================================
+
+services:
+  # Local Postgres service exists in base compose for dev — disabled in prod
+  # via a profile that is never activated. Prod uses external loyd-pg.
+  db:
+    profiles: ["local-only"]
+
+  backend:
+    restart: unless-stopped
+    depends_on: []
+    ports:
+      - "${BACKEND_PORT:-8100}:8000"
+    volumes:
+      - /etc/lens/secrets-proxy.crt:/etc/lens/secrets-proxy.crt:ro
+      - /etc/lens/secrets-proxy.key:/etc/lens/secrets-proxy.key:ro
+    # Run alembic for all schemas, then start uvicorn with 2 workers for prod.
+    command: >
+      sh -c "alembic -x mode=all upgrade head &&
+             uvicorn lens.main:app --host 0.0.0.0 --port 8000 --workers 2"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  worker-jira:
+    restart: unless-stopped
+    depends_on: []
+    volumes:
+      - /etc/lens/secrets-proxy.crt:/etc/lens/secrets-proxy.crt:ro
+      - /etc/lens/secrets-proxy.key:/etc/lens/secrets-proxy.key:ro
+    # Prod cadence: 5-min incremental sync.
+    command: ["python", "-m", "lens.workers.jira", "--interval", "300"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  frontend:
+    restart: unless-stopped
+    depends_on: []
+    ports:
+      - "${FRONTEND_PORT:-3100}:3000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
