@@ -8,7 +8,7 @@ Netsmart's multi-client consulting portal. Select a client, see everything Netsm
 - **Frontend:** Next.js 15 + React 19 + TypeScript + Tailwind 4 + shadcn/ui + recharts + cmdk
 - **Sync workers:** same Python package as backend, different entrypoints (one container per source × tenant)
 - **Auth:** Authentik OIDC (hand-rolled; session cookie)
-- **Deployment:** Docker Compose on Proxmox, VM 118 (172.16.20.11)
+- **Deployment:** Docker Compose on Proxmox, VM 121 (172.16.20.11)
 
 ## Quick start (development)
 
