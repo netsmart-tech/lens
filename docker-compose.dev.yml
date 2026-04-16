@@ -43,5 +43,8 @@ services:
     ports:
       - "${FRONTEND_PORT:-3101}:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-8101}
+      # Empty => browser issues same-origin /api/* calls; Next.js rewrites them
+      # server-side to INTERNAL_API_URL. Works for localhost AND LAN-IP access.
+      NEXT_PUBLIC_API_URL: ""
+      INTERNAL_API_URL: http://backend:8000
       WATCHPACK_POLLING: "true"
