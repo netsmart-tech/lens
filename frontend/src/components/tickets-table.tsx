@@ -2,9 +2,16 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronUp, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -32,16 +39,16 @@ interface SortState {
 interface FilterState {
   key: string;
   summary: string;
-  status: string;
-  priority: string;
+  status: string[];
+  priority: string[];
 }
 
 const DEFAULT_SORT: SortState = { key: "updated", dir: "desc" };
 const EMPTY_FILTERS: FilterState = {
   key: "",
   summary: "",
-  status: "",
-  priority: "",
+  status: [],
+  priority: [],
 };
 
 function priorityVariant(
@@ -82,6 +89,86 @@ function cmpDate(a: string | null, b: string | null): number {
   if (isNaN(ta)) return 1;
   if (isNaN(tb)) return -1;
   return ta - tb;
+}
+
+interface MultiSelectFilterProps {
+  label: string;
+  options: string[];
+  selected: string[];
+  onToggle: (value: string) => void;
+  onClear: () => void;
+}
+
+function MultiSelectFilter({
+  label,
+  options,
+  selected,
+  onToggle,
+  onClear,
+}: MultiSelectFilterProps) {
+  const summary =
+    selected.length === 0
+      ? "All"
+      : selected.length === 1
+        ? selected[0]
+        : `${selected.length} selected`;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className={cn(
+          "flex h-7 w-full items-center justify-between gap-1 rounded-md border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+          selected.length === 0 && "text-muted-foreground",
+        )}
+        aria-label={`Filter by ${label}`}
+      >
+        <span className="truncate">{summary}</span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-[12rem]">
+        {options.length === 0 ? (
+          <div className="px-2 py-1.5 text-xs text-muted-foreground">
+            No options
+          </div>
+        ) : (
+          <>
+            {options.map((opt) => {
+              const isSelected = selected.includes(opt);
+              return (
+                <DropdownMenuItem
+                  key={opt}
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    onToggle(opt);
+                  }}
+                  className="text-xs"
+                >
+                  <span className="flex h-3.5 w-3.5 items-center justify-center">
+                    {isSelected && <Check className="h-3.5 w-3.5" />}
+                  </span>
+                  <span className="truncate">{opt}</span>
+                </DropdownMenuItem>
+              );
+            })}
+            {selected.length > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    onClear();
+                  }}
+                  className="text-xs text-muted-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Clear
+                </DropdownMenuItem>
+              </>
+            )}
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 function SortIcon({ dir }: { dir: SortDir | null }) {
@@ -158,8 +245,16 @@ export function TicketsTable({ tenantSlug, issues }: Props) {
     return issues.filter((i) => {
       if (kq && !i.key.toLowerCase().includes(kq)) return false;
       if (sq && !i.summary.toLowerCase().includes(sq)) return false;
-      if (filters.status && i.status !== filters.status) return false;
-      if (filters.priority && i.priority !== filters.priority) return false;
+      if (
+        filters.status.length > 0 &&
+        (!i.status || !filters.status.includes(i.status))
+      )
+        return false;
+      if (
+        filters.priority.length > 0 &&
+        (!i.priority || !filters.priority.includes(i.priority))
+      )
+        return false;
       return true;
     });
   }, [issues, filters]);
@@ -179,8 +274,18 @@ export function TicketsTable({ tenantSlug, issues }: Props) {
   const hasActiveFilter =
     !!filters.key ||
     !!filters.summary ||
-    !!filters.status ||
-    !!filters.priority;
+    filters.status.length > 0 ||
+    filters.priority.length > 0;
+
+  const toggleValue = (field: "status" | "priority", value: string) => {
+    setFilters((f) => {
+      const current = f[field];
+      const next = current.includes(value)
+        ? current.filter((v) => v !== value)
+        : [...current, value];
+      return { ...f, [field]: next };
+    });
+  };
 
   return (
     <div className="overflow-hidden rounded-lg border">
@@ -244,36 +349,22 @@ export function TicketsTable({ tenantSlug, issues }: Props) {
               />
             </TableHead>
             <TableHead className="py-1.5">
-              <select
-                value={filters.status}
-                onChange={(e) =>
-                  setFilters((f) => ({ ...f, status: e.target.value }))
-                }
-                className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              >
-                <option value="">All</option>
-                {statusOptions.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+              <MultiSelectFilter
+                label="Status"
+                options={statusOptions}
+                selected={filters.status}
+                onToggle={(v) => toggleValue("status", v)}
+                onClear={() => setFilters((f) => ({ ...f, status: [] }))}
+              />
             </TableHead>
             <TableHead className="py-1.5">
-              <select
-                value={filters.priority}
-                onChange={(e) =>
-                  setFilters((f) => ({ ...f, priority: e.target.value }))
-                }
-                className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              >
-                <option value="">All</option>
-                {priorityOptions.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </select>
+              <MultiSelectFilter
+                label="Priority"
+                options={priorityOptions}
+                selected={filters.priority}
+                onToggle={(v) => toggleValue("priority", v)}
+                onClear={() => setFilters((f) => ({ ...f, priority: [] }))}
+              />
             </TableHead>
             <TableHead className="py-1.5">
               {hasActiveFilter && (
