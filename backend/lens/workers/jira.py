@@ -97,7 +97,7 @@ async def sync_tenant(
         jql_parts = ["assignee = currentUser()"]
         if mode == "incremental" and ss.cursor:
             # 5-min overlap per Teo §10
-            jql_parts.append(f'updated >= "{ss.cursor}"')
+            jql_parts.append(f'updated >= "{_format_jql_datetime(ss.cursor)}"')
         jql = " AND ".join(jql_parts) + " ORDER BY updated ASC"
 
         async with JiraClient(base_url, authorization) as client:
@@ -190,6 +190,21 @@ async def sync_tenant(
         log.error("jira_sync_fail", tenant=tenant.slug, error=str(e))
     finally:
         await session.close()
+
+
+def _format_jql_datetime(ts: str) -> str:
+    """Format an ISO-8601 timestamp for JQL's `updated >= "..."` clause.
+
+    JQL only accepts `"yyyy-MM-dd HH:mm"` (minute precision, no seconds, no
+    fractional, no timezone offset). Passing anything else — including the
+    full ISO-8601 form Postgres stores — makes Atlassian silently return zero
+    matches, freezing the sync cursor. Always normalize to UTC minute
+    precision before it goes on the wire.
+    """
+    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).strftime("%Y-%m-%d %H:%M")
 
 
 def _safe_parse(ts: str | None) -> datetime | None:

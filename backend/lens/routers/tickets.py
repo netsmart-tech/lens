@@ -27,6 +27,7 @@ from lens.schemas.tickets import (
     TransitionListResponse,
     TransitionResponse,
 )
+from lens.services.activities import record_activity
 from lens.services.jira import JiraClient, plain_text_to_adf
 from lens.services.jira_tenant import ensure_site, resolve_jira_config, upsert_issue
 from lens.services.sync_envelope import with_sync_envelope
@@ -226,7 +227,7 @@ async def create_comment(
     key: str,
     payload: CommentCreateRequest,
     ctx: TenantContext = Depends(resolve_tenant),
-    _user: User = Depends(require_authenticated),
+    user: User = Depends(require_authenticated),
 ) -> CommentResponse:
     """Post a plain-text comment to a Jira issue and mirror it locally.
 
@@ -296,6 +297,23 @@ async def create_comment(
         if existing is None:
             await ctx.session.execute(stmt)
 
+    # Activity row — Lens mutations write directly so the feed lights up
+    # instantly instead of waiting on the next worker tick. dedup_key uses
+    # Jira's comment external_id so a later worker pass over the same issue
+    # can't double-record.
+    if external_id:
+        await record_activity(
+            ctx.session,
+            tenant_id=ctx.tenant.id,
+            source="jira",
+            dedup_key=f"{key}:comment:{external_id}",
+            actor=user.email,
+            action="commented",
+            subject=f"{key}: {row.summary}" if row.summary else key,
+            occurred_at=created_dt,
+            metadata={"key": key, "comment_id": external_id, "via": "lens"},
+        )
+
     return CommentResponse(
         id=int_id,
         author=author,
@@ -339,7 +357,7 @@ async def apply_transition(
     key: str,
     payload: TransitionApplyRequest,
     ctx: TenantContext = Depends(resolve_tenant),
-    _user: User = Depends(require_authenticated),
+    user: User = Depends(require_authenticated),
 ) -> TicketDetailResponse:
     """Apply a workflow transition, then re-sync the issue locally.
 
@@ -365,7 +383,42 @@ async def apply_transition(
         await ctx.session.execute(select(JiraIssue).where(JiraIssue.key == key))
     ).scalar_one()
 
+    # Activity row — dedup_key on (key, transition_id, new updated timestamp)
+    # so a repeated transition to the same state from the worker won't double-
+    # record, but a user cycling a ticket in-progress → done → in-progress will
+    # get two rows (each has a distinct Jira-side `updated`).
+    new_status = (
+        ((refreshed.get("fields") or {}).get("status") or {}).get("name")
+    )
+    jira_updated = (refreshed.get("fields") or {}).get("updated")
+    dedup_suffix = jira_updated or datetime.now(UTC).isoformat()
+    await record_activity(
+        ctx.session,
+        tenant_id=ctx.tenant.id,
+        source="jira",
+        dedup_key=f"{key}:transition:{payload.transition_id}:{dedup_suffix}",
+        actor=user.email,
+        action="transitioned",
+        subject=f"{key}: → {new_status}" if new_status else key,
+        occurred_at=_parse_iso(jira_updated) or datetime.now(UTC),
+        metadata={
+            "key": key,
+            "transition_id": payload.transition_id,
+            "to_status": new_status,
+            "via": "lens",
+        },
+    )
+
     return await _build_ticket_detail(updated, ctx.session)
+
+
+def _parse_iso(ts: str | None) -> datetime | None:
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 @router.post("/tickets/{key}/refresh", response_model=TicketDetailResponse)

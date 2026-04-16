@@ -22,6 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from lens.auth.session import encode_session
 from lens.config import settings
+from lens.models.core.activities import Activity
+from lens.models.core.tenants import Tenant
 from lens.models.core.users import User
 from lens.models.tenant.jira_comments import JiraComment
 from lens.models.tenant.jira_issues import JiraIssue
@@ -256,9 +258,26 @@ async def test_create_comment_posts_adf_and_dual_writes(
             assert len(rows) == 1
             assert rows[0].external_id == "10001"
             assert rows[0].author == "teo@netsmart.tech"
+            # Activity row landed with the expected dedup_key + verb.
+            tenant_id = (
+                await s.execute(select(Tenant.id).where(Tenant.slug == TENANT))
+            ).scalar_one()
+            act = (
+                await s.execute(
+                    select(Activity).where(
+                        Activity.tenant_id == tenant_id,
+                        Activity.dedup_key == f"{ISSUE_KEY}:comment:10001",
+                    )
+                )
+            ).scalar_one()
+            assert act.action == "commented"
+            assert act.actor == "test-teo@netsmart.tech"
+            assert act.source == "jira"
+            assert (act.metadata_ or {}).get("via") == "lens"
             # Cleanup so repeat runs stay idempotent.
             for r in rows:
                 await s.delete(r)
+            await s.delete(act)
             await s.commit()
     finally:
         await engine.dispose()
@@ -341,11 +360,27 @@ async def test_apply_transition_resyncs_issue_status(
                 await s.execute(select(JiraIssue).where(JiraIssue.key == ISSUE_KEY))
             ).scalar_one()
             assert row.status == "Done"
+            # Activity row: dedup_key includes the refreshed `updated` ts.
+            tenant_id = (
+                await s.execute(select(Tenant.id).where(Tenant.slug == TENANT))
+            ).scalar_one()
+            act = (
+                await s.execute(
+                    select(Activity).where(
+                        Activity.tenant_id == tenant_id,
+                        Activity.action == "transitioned",
+                    )
+                )
+            ).scalar_one()
+            assert act.source == "jira"
+            assert (act.metadata_ or {}).get("to_status") == "Done"
+            assert (act.metadata_ or {}).get("transition_id") == "21"
             # Reset for rerunnability.
             row.status = "To Do"
             row.priority = None
             row.raw = {"key": ISSUE_KEY, "fields": {"summary": "Mutation target"}}
             row.issue_updated = None
+            await s.delete(act)
             await s.commit()
     finally:
         await engine.dispose()
