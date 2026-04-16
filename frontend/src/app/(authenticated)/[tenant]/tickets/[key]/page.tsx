@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -29,6 +29,21 @@ export default function TicketDetailPage({ params }: Params) {
   const decodedKey = decodeURIComponent(key);
   const [issue, setIssue] = useState<JiraIssueDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      const fresh = await api.refreshTicket(tenant, decodedKey);
+      setIssue(fresh);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to refresh");
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -48,13 +63,30 @@ export default function TicketDetailPage({ params }: Params) {
 
   return (
     <div className="space-y-4">
-      <div>
+      <div className="flex items-center justify-between">
         <Button asChild variant="ghost" size="sm" className="-ml-3 gap-1">
           <Link href={`/${tenant}/tickets`}>
             <ArrowLeft className="h-3.5 w-3.5" />
             Tickets
           </Link>
         </Button>
+        {issue && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            aria-label="Refresh ticket"
+          >
+            {refreshing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            Refresh
+          </Button>
+        )}
       </div>
 
       {error && (

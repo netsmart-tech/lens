@@ -74,6 +74,11 @@ export const api = {
   },
   getTicket: (tenant: string, key: string) =>
     request<JiraIssueDetail>(`/api/${tenant}/tickets/${encodeURIComponent(key)}`),
+  refreshTicket: (tenant: string, key: string) =>
+    request<JiraIssueDetail>(
+      `/api/${tenant}/tickets/${encodeURIComponent(key)}/refresh`,
+      { method: "POST" },
+    ),
   postComment: (tenant: string, key: string, body: string) =>
     request<JiraComment>(
       `/api/${tenant}/tickets/${encodeURIComponent(key)}/comments`,

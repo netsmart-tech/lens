@@ -9,6 +9,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from lens.auth.deps import require_authenticated
 from lens.db.tenant import TenantContext, resolve_tenant
@@ -27,7 +28,7 @@ from lens.schemas.tickets import (
     TransitionResponse,
 )
 from lens.services.jira import JiraClient, plain_text_to_adf
-from lens.services.jira_tenant import resolve_jira_config, upsert_issue
+from lens.services.jira_tenant import ensure_site, resolve_jira_config, upsert_issue
 from lens.services.sync_envelope import with_sync_envelope
 
 log = get_logger(__name__)
@@ -93,36 +94,24 @@ async def list_tickets(
     return envelope
 
 
-@router.get("/tickets/{key}", response_model=TicketDetailResponse)
-async def get_ticket(
-    key: str,
-    ctx: TenantContext = Depends(resolve_tenant),
-    _user: User = Depends(require_authenticated),
-):
-    """Get a single ticket by key. Within a tenant, Jira issue keys are
-    globally unique across any jira_sites rows (Atlassian namespaces by
-    project prefix), so we don't need a site_id in the URL.
+async def _build_ticket_detail(
+    row: JiraIssue, session: AsyncSession
+) -> TicketDetailResponse:
+    """Shape one `jira_issues` row into `TicketDetailResponse`.
 
-    Returns issue metadata + description (flattened from ADF) + comments
-    (empty today — the worker doesn't sync comments yet; schema is
-    ready for when it does).
+    Centralizes the ADF-flatten + comments-from-raw-fallback so
+    `GET /tickets/{key}`, `POST /tickets/{key}/transitions`, and
+    `POST /tickets/{key}/refresh` all return the same shape. Prefers the
+    `jira_comments` table when populated; falls back to the inline
+    `raw.fields.comment.comments` when not.
     """
-    stmt = select(JiraIssue).where(JiraIssue.key == key)
-    row = (await ctx.session.execute(stmt)).scalar_one_or_none()
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
-
     fields: dict[str, Any] = (row.raw or {}).get("fields") or {}
     description = _adf_to_text(fields.get("description")).strip() or None
 
-    # Prefer the jira_comments table when the worker has populated it (Phase 2
-    # expand). In Phase 1 the table is empty but raw.fields.comment.comments
-    # holds the first ~5 comments inline from the /search/jql response — parse
-    # those so detail pages render immediately.
     comments_rows = (
-        await ctx.session.execute(
+        await session.execute(
             select(JiraComment)
-            .where(JiraComment.site_id == row.site_id, JiraComment.issue_key == key)
+            .where(JiraComment.site_id == row.site_id, JiraComment.issue_key == row.key)
             .order_by(JiraComment.created.asc())
         )
     ).scalars().all()
@@ -145,8 +134,7 @@ async def get_ticket(
                 cid = int(raw_id)
             except (TypeError, ValueError):
                 cid = abs(hash(raw_id)) & 0x7FFFFFFF
-            from datetime import datetime as _dt
-            created_dt = _dt.fromisoformat(created.replace("Z", "+00:00"))
+            created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
             comments.append(CommentResponse(
                 id=cid,
                 author=author,
@@ -157,6 +145,28 @@ async def get_ticket(
     return TicketDetailResponse.model_validate(row).model_copy(
         update={"description": description, "comments": comments}
     )
+
+
+@router.get("/tickets/{key}", response_model=TicketDetailResponse)
+async def get_ticket(
+    key: str,
+    ctx: TenantContext = Depends(resolve_tenant),
+    _user: User = Depends(require_authenticated),
+):
+    """Get a single ticket by key. Within a tenant, Jira issue keys are
+    globally unique across any jira_sites rows (Atlassian namespaces by
+    project prefix), so we don't need a site_id in the URL.
+
+    Returns issue metadata + description (flattened from ADF) + comments
+    (empty today — the worker doesn't sync comments yet; schema is
+    ready for when it does).
+    """
+    stmt = select(JiraIssue).where(JiraIssue.key == key)
+    row = (await ctx.session.execute(stmt)).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    return await _build_ticket_detail(row, ctx.session)
 
 
 # ---- mutations --------------------------------------------------------------
@@ -355,18 +365,51 @@ async def apply_transition(
         await ctx.session.execute(select(JiraIssue).where(JiraIssue.key == key))
     ).scalar_one()
 
-    fields: dict[str, Any] = (updated.raw or {}).get("fields") or {}
-    description = _adf_to_text(fields.get("description")).strip() or None
+    return await _build_ticket_detail(updated, ctx.session)
 
-    comments_rows = (
-        await ctx.session.execute(
-            select(JiraComment)
-            .where(JiraComment.site_id == updated.site_id, JiraComment.issue_key == key)
-            .order_by(JiraComment.created.asc())
-        )
-    ).scalars().all()
-    comments = [CommentResponse.model_validate(c) for c in comments_rows]
 
-    return TicketDetailResponse.model_validate(updated).model_copy(
-        update={"description": description, "comments": comments}
-    )
+@router.post("/tickets/{key}/refresh", response_model=TicketDetailResponse)
+async def refresh_ticket(
+    key: str,
+    ctx: TenantContext = Depends(resolve_tenant),
+    _user: User = Depends(require_authenticated),
+) -> TicketDetailResponse:
+    """Force-resync a single ticket from Jira and return the refreshed detail.
+
+    Bypasses the 5-min worker cadence so the detail page's refresh button
+    reflects external Jira changes immediately. 404 if the ticket doesn't
+    exist locally (refresh is a re-sync, not an import); 503 if the tenant
+    isn't Jira-configured; Jira 4xx proxied through via `_raise_from_jira`.
+    """
+    row = await _load_issue_or_404(ctx, key)
+
+    async with _jira_client_for(ctx.tenant.slug) as client:
+        base_url = client.base_url
+        try:
+            # Match the fields the worker pulls so `raw` stays consistent between
+            # worker syncs and ad-hoc refreshes. Jira's default field set already
+            # includes description+comment, so this is belt-and-suspenders.
+            issue_json = await client.get_issue(
+                key,
+                fields=[
+                    "summary", "status", "priority", "assignee", "reporter",
+                    "created", "updated", "description", "comment",
+                ],
+            )
+        except httpx.HTTPStatusError as e:
+            _raise_from_jira(e)
+
+    # Re-ensure the site row keyed on base_url (cheap find-or-create — same
+    # call shape as the worker). Matches whatever site the existing row points
+    # at today since base_url is stable per-tenant.
+    site = await ensure_site(ctx.session, base_url)
+    await upsert_issue(ctx.session, site.id, issue_json)
+
+    # upsert_issue uses core SQL (pg_insert), not the ORM, so the identity-mapped
+    # `row` is stale — expire + re-select the same way apply_transition does.
+    ctx.session.expire(row)
+    updated = (
+        await ctx.session.execute(select(JiraIssue).where(JiraIssue.key == key))
+    ).scalar_one()
+
+    return await _build_ticket_detail(updated, ctx.session)

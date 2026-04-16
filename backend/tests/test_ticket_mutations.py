@@ -352,6 +352,109 @@ async def test_apply_transition_resyncs_issue_status(
 
 
 @pytest.mark.asyncio
+async def test_refresh_ticket_resyncs_from_jira(
+    http_client: httpx.AsyncClient,
+    seed_issue: dict[str, Any],
+    async_database_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Happy path: POST /tickets/{key}/refresh pulls fresh JSON from Jira,
+    upserts the row, and returns the refreshed TicketDetailResponse.
+    Verifies raw.fields.comment.comments fallback surfaces comments in the
+    response (mirroring the existing get_ticket behavior)."""
+    refreshed_payload = {
+        "key": ISSUE_KEY,
+        "fields": {
+            "summary": "Mutation target",
+            "status": {"name": "In Review"},
+            "priority": {"name": "High"},
+            "assignee": {"emailAddress": "teo@netsmart.tech"},
+            "reporter": {"emailAddress": "steve@netsmart.tech"},
+            "created": "2026-04-01T10:00:00.000+0000",
+            "updated": "2026-04-15T14:00:00.000+0000",
+            "description": {
+                "type": "doc",
+                "version": 1,
+                "content": [
+                    {"type": "paragraph", "content": [{"type": "text", "text": "fresh desc"}]},
+                ],
+            },
+            "comment": {
+                "comments": [
+                    {
+                        "id": "20001",
+                        "author": {"emailAddress": "external@topbuild.com"},
+                        "body": {
+                            "type": "doc",
+                            "version": 1,
+                            "content": [
+                                {"type": "paragraph", "content": [{"type": "text", "text": "new external note"}]},
+                            ],
+                        },
+                        "created": "2026-04-15T13:45:00.000+0000",
+                    }
+                ]
+            },
+        },
+    }
+    _patch_jira_calls(
+        monkeypatch,
+        get_map={f"/rest/api/3/issue/{ISSUE_KEY}": refreshed_payload},
+    )
+
+    resp = await http_client.post(f"/api/{TENANT}/tickets/{ISSUE_KEY}/refresh")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["key"] == ISSUE_KEY
+    assert body["status"] == "In Review"
+    assert body["priority"] == "High"
+    assert "fresh desc" in (body.get("description") or "")
+    # Comments flow through the raw-fallback (jira_comments table is empty).
+    assert len(body["comments"]) == 1
+    assert body["comments"][0]["author"] == "external@topbuild.com"
+    assert "new external note" in body["comments"][0]["body"]
+
+    # Row was upserted in the tenant schema.
+    engine = create_async_engine(async_database_url)
+    try:
+        async with AsyncSession(bind=engine, expire_on_commit=False) as s:
+            await s.connection(
+                execution_options={"schema_translate_map": {"tenant": TENANT_SCHEMA}}
+            )
+            row = (
+                await s.execute(select(JiraIssue).where(JiraIssue.key == ISSUE_KEY))
+            ).scalar_one()
+            assert row.status == "In Review"
+            assert row.priority == "High"
+            # Reset for rerunnability.
+            row.status = "To Do"
+            row.priority = None
+            row.raw = {"key": ISSUE_KEY, "fields": {"summary": "Mutation target"}}
+            row.issue_updated = None
+            await s.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_refresh_ticket_503_when_tenant_unconfigured(
+    http_client: httpx.AsyncClient,
+    seed_issue: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If resolve_jira_config returns None (tenant not wired up to Jira),
+    the endpoint surfaces a 503 rather than attempting an outbound call."""
+    from lens.routers import tickets as tickets_router
+    from lens.services import jira_tenant
+
+    monkeypatch.setattr(jira_tenant, "resolve_jira_config", lambda slug: None)
+    monkeypatch.setattr(tickets_router, "resolve_jira_config", lambda slug: None)
+
+    resp = await http_client.post(f"/api/{TENANT}/tickets/{ISSUE_KEY}/refresh")
+    assert resp.status_code == 503, resp.text
+
+
+@pytest.mark.asyncio
 async def test_comment_validates_non_empty_body(
     http_client: httpx.AsyncClient,
     seed_issue: dict[str, Any],
